@@ -1,0 +1,15 @@
+#!/bin/sh
+# Factory check: runs before every commit, and CI runs it too.
+# Installed by software-factory (factory-init.sh).
+[ -f package.json ] || exit 0
+if [ ! -d node_modules ] && [ ! -f .pnp.cjs ]; then
+  echo "pre-commit: dependencies aren't installed. Install them (npm ci, pnpm install, ...) and commit again." >&2
+  exit 1
+fi
+export CI=true # test runners run once instead of watching
+for step in typecheck lint test; do
+  if ! npm run --if-present "$step"; then
+    echo "pre-commit: '$step' failed. Fix the cause and commit again. Don't bypass it with --no-verify." >&2
+    exit 1
+  fi
+done

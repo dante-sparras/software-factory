@@ -7,6 +7,9 @@
 #   --no-pr         Commit on the setup branch locally. Don't push or open a PR.
 #   --skip-github   Don't touch labels, topics or rulesets (for offline testing).
 #   --no-t3         Don't add the repo as a T3 Code project.
+#   --quality <bar> prototype, production or library: tells agents what code
+#                   quality the repo needs. Default: the repo's current bar,
+#                   or production on the first run.
 #
 # For each repo this does what /setup-matt-pocock-skills does when you pick
 # GitHub, the default labels and single-context, then adds the factory's
@@ -17,7 +20,7 @@ set -euo pipefail
 KIT="$(cd "$(dirname "$0")" && pwd)"
 SEEDS=https://raw.githubusercontent.com/mattpocock/skills/main/skills/engineering/setup-matt-pocock-skills
 BRANCH=chore/factory-setup
-REFRESH=0 OPEN_PR=1 GITHUB=1 T3=1
+REFRESH=0 OPEN_PR=1 GITHUB=1 T3=1 QUALITY=
 START='<!-- software-factory:start -->' END='<!-- software-factory:end -->'
 
 LABELS=(
@@ -42,13 +45,20 @@ native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1
 # unmarked `## Agent skills` section left by a manual setup run.
 write_agents_block() {
   local file=$1
-  node - "$file" "$(native "$KIT/templates/agents-block.md")" "$START" "$END" <<'JS'
+  node - "$file" "$(native "$KIT/templates/agents-block.md")" "$START" "$END" "$QUALITY" <<'JS'
 const fs = require("fs");
-const [file, blockPath, start, end] = process.argv.slice(2);
-const block = `${start}\n${fs.readFileSync(blockPath, "utf8").replace(/\r\n/g, "\n").trim()}\n${end}\n`;
+const [file, blockPath, start, end, quality] = process.argv.slice(2);
+const bars = {
+  prototype: "**prototype**. Speed over perfection: skip edge cases and polish, but keep the checks green.",
+  production: "**production**. This code will be maintained for years: follow the existing patterns, handle edge cases and add tests with every change.",
+  library: "**library**. The public API is a promise: don't break it without a major version, and document every change to it.",
+};
 let text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
 const eol = text.includes("\r\n") ? "\r\n" : "\n";
 text = text.replace(/\r\n/g, "\n");
+const bar = quality || (text.match(/^- Quality bar: \*\*(\w+)\*\*/m) || [])[1] || "production";
+const body = fs.readFileSync(blockPath, "utf8").replace(/\r\n/g, "\n").trim().replace("{{QUALITY}}", bars[bar] || bars.production);
+const block = `${start}\n${body}\n${end}\n`;
 const marked = new RegExp(`${start}[\\s\\S]*?${end}\\n?`);
 if (marked.test(text)) {
   text = text.replace(marked, block);
@@ -97,6 +107,43 @@ setup_ci() {
     echo "  added .github/workflows/ci.yml (typecheck, lint, test)"
   else
     warn "no package.json: add a CI workflow with a job called 'ci' yourself"
+  fi
+}
+
+# Block bad commits: a pre-commit hook that runs the same checks as CI, so an
+# agent has to fix a failure before it can commit, not after CI goes red.
+setup_hooks() {
+  if [ ! -f package.json ]; then
+    warn "no package.json: no pre-commit check added"; return
+  fi
+  if [ -f .githooks/pre-commit ] && [ "$REFRESH" = 0 ]; then
+    echo "  kept .githooks/pre-commit"
+  else
+    mkdir -p .githooks
+    cp "$KIT/templates/pre-commit" .githooks/pre-commit
+    git add --chmod=+x .githooks/pre-commit
+    echo "  added .githooks/pre-commit (typecheck, lint, test before every commit)"
+  fi
+}
+
+# Turn the hook on once the setup commit is made, so it doesn't run on that commit.
+enable_hooks() {
+  [ -f .githooks/pre-commit ] || return 0
+  local current other=""
+  current=$(git config --get core.hooksPath || true)
+  if [ -n "$current" ] && [ "$current" != .githooks ]; then other="core.hooksPath ($current)"
+  elif [ -d .husky ]; then other="husky"
+  elif ls lefthook.yml lefthook.yaml .lefthook.yml .lefthook.yaml >/dev/null 2>&1; then other="lefthook"
+  elif [ -f .pre-commit-config.yaml ]; then other="pre-commit"
+  elif grep -q '"simple-git-hooks"' package.json; then other="simple-git-hooks"
+  elif ls "$(git rev-parse --git-common-dir)/hooks" 2>/dev/null | grep -qv '\.sample$'; then other=".git/hooks"
+  fi
+  if [ -n "$other" ]; then
+    warn "repo already runs git hooks through $other: call 'sh .githooks/pre-commit' from its pre-commit hook"
+  else
+    # Local config is shared by every worktree, so T3's worktrees get it too.
+    git config core.hooksPath .githooks
+    echo "  hooks on: git runs .githooks/ in every checkout of this repo on this machine"
   fi
 }
 
@@ -184,6 +231,7 @@ init_repo() {
     setup_docs
     setup_instructions
     setup_ci
+    setup_hooks
     if [ "$GITHUB" = 1 ]; then setup_github "$slug" "$default"; fi
     git add -A
     if git diff --cached --quiet; then
@@ -200,6 +248,7 @@ init_repo() {
         echo "  committed on branch $BRANCH (not pushed)"
       fi
     fi
+    enable_hooks
   )
   git worktree remove --force "$wt"
   trap - EXIT
@@ -207,15 +256,22 @@ init_repo() {
 }
 
 repos=()
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --refresh) REFRESH=1 ;;
     --no-pr) OPEN_PR=0 ;;
     --skip-github) GITHUB=0 ;;
     --no-t3) T3=0 ;;
-    -*) echo "Unknown option: $arg" >&2; exit 2 ;;
-    *) repos+=("$(cd "$arg" && pwd)") ;;
+    --quality)
+      QUALITY=${2:-}
+      case "$QUALITY" in
+        prototype|production|library) shift ;;
+        *) echo "--quality takes prototype, production or library" >&2; exit 2 ;;
+      esac ;;
+    -*) echo "Unknown option: $1" >&2; exit 2 ;;
+    *) repos+=("$(cd "$1" && pwd)") ;;
   esac
+  shift
 done
-[ ${#repos[@]} -gt 0 ] || { sed -n '2,14p' "$0"; exit 2; }
+[ ${#repos[@]} -gt 0 ] || { sed -n '2,17p' "$0"; exit 2; }
 for r in "${repos[@]}"; do init_repo "$r"; done
