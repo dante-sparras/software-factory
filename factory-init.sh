@@ -31,6 +31,10 @@ LABELS=(
   "wayfinder:prototype|c5def5|Wayfinder ticket: prototype"
   "wayfinder:grilling|c5def5|Wayfinder ticket: grilling"
   "wayfinder:task|c5def5|Wayfinder ticket: task"
+  "ready-for-decompose|5319e7|Spec ready to split into tickets"
+  "needs-rework|e99695|Rework the PR as the latest comment asks"
+  "approved|0e8a16|Reviewed by a human, ready to merge"
+  "factory-fix|d93f0b|A failed factory run, or the PR that fixes it"
 )
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -110,7 +114,7 @@ setup_github() {
     IFS='|' read -r name color desc <<<"$l"
     gh label create "$name" --repo "$slug" --color "$color" --description "$desc" --force >/dev/null
   done
-  echo "  labels: 5 triage + 5 wayfinder"
+  echo "  labels: 5 triage + 5 wayfinder + 4 factory"
 
   gh repo edit "$slug" --add-topic factory --delete-branch-on-merge >/dev/null
   echo "  topic 'factory' added (Foreman only works in repos with this topic)"
