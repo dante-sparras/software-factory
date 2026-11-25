@@ -19,6 +19,5 @@ jobs:
           elif [ -f bun.lock ] || [ -f bun.lockb ]; then npm i -g bun && bun install --frozen-lockfile
           else npm ci
           fi
-      - run: npm run --if-present typecheck
-      - run: npm run --if-present lint
-      - run: npm run --if-present test
+      - name: Typecheck, lint, test (same as the pre-commit hook)
+        run: sh .githooks/pre-commit

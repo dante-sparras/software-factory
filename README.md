@@ -7,7 +7,7 @@ Matt Pocock's skills, T3 Code and Grok Bot, set up once per machine and once per
 | `machine-setup.sh` | Parks every other global skill and installs Matt's 27 skills for Claude Code, Cursor, Grok Build and Antigravity. |
 | `factory-init.sh` | Puts one or more repos on the factory. Safe to re-run. |
 | `foreman.md` | The description for the Grok Bot that runs the factory. |
-| `templates/` | The `AGENTS.md` block and a Node CI workflow, used by `factory-init.sh`. |
+| `templates/` | The `AGENTS.md` block, a Node CI workflow and a pre-commit hook, used by `factory-init.sh`. |
 
 Run the scripts in Git Bash on Windows, or in any shell on macOS or Linux.
 
@@ -35,14 +35,21 @@ For each repo, this does what `/setup-matt-pocock-skills` would do if you picked
 
 It also adds the factory's own pieces:
 - the `wayfinder:*` labels;
-- a `## Factory` block in `AGENTS.md`;
+- a `## Factory` block in `AGENTS.md`, with a quality bar: `prototype`, `production` (the default) or `library`;
 - a `CLAUDE.md` that imports `AGENTS.md`;
-- a `ci` workflow for Node repos;
+- for Node repos, a `.githooks/pre-commit` that runs typecheck, lint and test before every commit, and a `ci` workflow that runs the same hook;
 - the `factory` topic;
 - a ruleset on the default branch: PRs only, no force-push, `ci` must pass;
 - a T3 project for the repo.
 
 File changes go to `chore/factory-setup` and arrive as a PR. Merge it, and the repo is on the factory.
+
+Set the quality bar when a repo isn't production code. Later runs keep the bar the repo already has:
+```bash
+./factory-init.sh --quality prototype ~/Projects/demo
+```
+
+The pre-commit hook is turned on with `git config core.hooksPath .githooks`. That setting stays on this machine, and every worktree of the repo shares it. On another machine, run `factory-init.sh` again. If the repo already runs hooks through husky, lefthook or similar, the script leaves them alone and tells you to call `sh .githooks/pre-commit` from your own hook.
 
 To set up every repo you've cloned, run it on the folder. Folders that aren't GitHub repos are skipped. Watch for repos you don't want on the factory, such as your old skills repo:
 ```bash
